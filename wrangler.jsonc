@@ -1,0 +1,7 @@
+// Cloudflare Worker（中转服务器）的配置。
+// Cloudflare 从 GitHub 读取这个仓库后，按这里的设置部署 worker/worker.js。
+{
+  "name": "manga-reader",
+  "main": "worker/worker.js",
+  "compatibility_date": "2025-09-01"
+}
