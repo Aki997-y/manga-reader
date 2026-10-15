@@ -1,0 +1,265 @@
+:root {
+  --bg: #121214;
+  --surface: #1e1e22;
+  --text: #ececf0;
+  --muted: #9a9aa5;
+  --accent: #ff7a59;
+  --bar: rgba(18, 18, 20, 0.92);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+button, select, label { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+[hidden] { display: none !important; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- 书架 ---------- */
+
+#library {
+  min-height: 100%;
+  padding: 0 calc(16px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.lib-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(12px + var(--safe-top)) 0 12px;
+  background: var(--bg);
+}
+
+.lib-header h1 { margin: 0; font-size: 28px; font-weight: 700; }
+
+.btn-primary {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1a0d08;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+.btn-primary.busy { opacity: 0.5; pointer-events: none; }
+
+.empty { margin-top: 18vh; text-align: center; color: var(--muted); line-height: 1.7; }
+.empty-title { font-size: 20px; color: var(--text); margin-bottom: 4px; }
+.empty .tip { margin-top: 28px; font-size: 13px; }
+
+.grid {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 18px 12px;
+}
+
+.card { position: relative; min-width: 0; }
+
+.card-open {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+}
+
+.cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.progress {
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) calc(var(--p, 0) * 100%), var(--surface) 0);
+}
+
+.card-title {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.card-meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
+
+.card-more {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 16px;
+  line-height: 30px;
+}
+
+/* ---------- 阅读器 ---------- */
+
+#reader {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  overflow: hidden;
+}
+
+.pager {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation; /* 禁止双击放大，点击更灵敏 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#page-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+
+.spinner {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.scroller {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  overflow-anchor: none; /* 滚动位置由 app.js 自己补偿，各浏览器表现一致 */
+}
+
+.strip { position: relative; width: 100%; background: #0b0b0c; }
+.strip img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-touch-callout: none;
+}
+.strip[data-error]::after {
+  content: attr(data-error);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+/* 菜单栏：默认隐藏，点屏幕中间出现 */
+.bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bar);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+.bar.top {
+  top: 0;
+  padding: calc(8px + var(--safe-top)) calc(12px + var(--safe-right)) 8px calc(8px + var(--safe-left));
+  transform: translateY(-100%);
+}
+.bar.bottom {
+  bottom: 0;
+  padding: 12px calc(16px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  transform: translateY(100%);
+}
+.ui-visible .bar { opacity: 1; transform: none; pointer-events: auto; }
+
+.icon-btn { width: 40px; height: 40px; font-size: 32px; line-height: 36px; flex: none; }
+
+.reader-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#mode-select {
+  flex: none;
+  padding: 6px 8px;
+  border: 1px solid #3a3a42;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.page-label { flex: none; min-width: 64px; font-size: 14px; font-variant-numeric: tabular-nums; }
+#page-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+
+/* ---------- 提示 ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(80px + var(--safe-bottom));
+  z-index: 10;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(40, 40, 46, 0.96);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}

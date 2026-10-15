@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121214">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="漫读">
+  <title>漫读</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <section id="library">
+    <header class="lib-header">
+      <h1>书架</h1>
+      <label id="import-btn" class="btn-primary" for="file-input">＋ 导入</label>
+      <input id="file-input" class="visually-hidden" type="file" multiple>
+    </header>
+
+    <div id="empty" class="empty" hidden>
+      <p class="empty-title">还没有漫画</p>
+      <p>点右上角「导入」，选择 <b>.cbz</b> / <b>.zip</b> 漫画文件，或者一次选中多张图片当作一本。</p>
+      <p class="tip">在 iPhone 上：用 Safari 打开本页 → 点「分享」→「添加到主屏幕」，之后从桌面图标打开，就像一个 App。</p>
+    </div>
+
+    <ul id="grid" class="grid"></ul>
+  </section>
+
+  <section id="reader" hidden>
+    <div id="pager" class="pager">
+      <img id="page-img" alt="">
+      <div id="spinner" class="spinner" hidden></div>
+    </div>
+    <div id="scroller" class="scroller" hidden></div>
+
+    <div class="bar top">
+      <button id="back-btn" class="icon-btn" aria-label="返回书架">‹</button>
+      <div id="reader-title" class="reader-title"></div>
+      <select id="mode-select" aria-label="阅读模式">
+        <option value="rtl">日漫（右→左）</option>
+        <option value="ltr">左→右</option>
+        <option value="vertical">条漫（竖向）</option>
+      </select>
+    </div>
+    <div class="bar bottom">
+      <span id="page-label" class="page-label">1 / 1</span>
+      <input id="page-slider" type="range" min="1" max="1" value="1" aria-label="跳转页码">
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
