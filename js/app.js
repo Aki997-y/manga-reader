@@ -1,6 +1,7 @@
 import { db } from './db.js';
 import { openZip, isImageName, imageType, naturalCompare } from './zip.js';
-import * as md from './mangadex.js';
+import { sources, getSource } from './sources/index.js';
+import { findNextChapter } from './chapters.js';
 
 const $ = id => document.getElementById(id);
 
@@ -16,8 +17,6 @@ const prefs = {
     try { localStorage.setItem(key, value); } catch { /* 忽略 */ }
   },
 };
-
-const currentLangs = () => md.LANGUAGE_SETS[prefs.get('langs', 'zh')] || md.LANGUAGE_SETS.zh;
 
 // ---------- 小工具 ----------
 
@@ -191,7 +190,7 @@ async function renderLibrary() {
 }
 
 function renderBookCard(book) {
-  const online = book.kind === 'mangadex';
+  const online = book.kind === 'online';
   let meta;
   if (online) {
     meta = book.lastReadAt ? `读到 ${book.lastChapterLabel}` : '未读';
@@ -215,7 +214,7 @@ function renderBookCard(book) {
     meta,
     badge: online ? '在线' : '',
     progress: online || !book.lastReadAt ? null : (book.page + 1) / book.pageCount,
-    onOpen: () => (online ? openDetail(book.mangaId) : openLocalBook(book)),
+    onOpen: () => (online ? openDetail(book.sourceId, book.mangaId) : openLocalBook(book)),
   });
 
   const more = el('button', 'card-more', '⋯');
@@ -258,39 +257,70 @@ function mangaCard({ title, cover, meta, badge, progress, onOpen }) {
 }
 
 // ---------- 发现（在线漫画） ----------
+// 这里只通过"源接口"拿数据，不关心是哪个网站。源的写法见 js/sources/README.md。
 
-const browse = { loaded: false, query: '', offset: 0, total: 0, loading: false, token: 0 };
+const browse = { source: null, loaded: false, query: '', page: 0, hasMore: false, loading: false, token: 0 };
+
+function sourceSettings(source) {
+  return Object.fromEntries(source.settings.map(s => [s.key, prefs.get(`source.${source.id}.${s.key}`, s.default)]));
+}
+
+function selectSource(id) {
+  browse.source = getSource(id) || sources[0];
+  prefs.set('source', browse.source.id);
+  $('source-select').value = browse.source.id;
+  $('browse-credit').textContent = browse.source.credit;
+
+  // 每个源的设置项（比如章节语言）显示成下拉框
+  const current = sourceSettings(browse.source);
+  $('source-settings').replaceChildren(...browse.source.settings.map(setting => {
+    const select = el('select', 'select');
+    select.setAttribute('aria-label', setting.label);
+    for (const opt of setting.options) select.append(new Option(opt.label, opt.value));
+    select.value = current[setting.key];
+    select.addEventListener('change', () => {
+      prefs.set(`source.${browse.source.id}.${setting.key}`, select.value);
+      loadBrowse(true);
+    });
+    return select;
+  }));
+}
 
 async function loadBrowse(reset) {
+  const source = browse.source;
   const status = $('browse-status');
-  if (!md.isConfigured()) {
-    status.textContent = '还没有配置中转服务器，暂时不能在线看漫画。配置方法见项目说明（README）。';
-    browse.loaded = true;
-    return;
-  }
+  browse.loaded = true;
   if (reset) {
-    $('browse-heading').textContent = browse.query ? `搜索「${browse.query}」` : '最近更新';
-    browse.offset = 0;
-    browse.total = 0;
+    $('browse-heading').textContent = browse.query ? `搜索「${browse.query}」` : source.latestTitle;
+    browse.page = 0;
+    browse.hasMore = false;
     $('browse-grid').replaceChildren();
   }
+  $('load-more').hidden = true;
+  if (!source.isAvailable()) {
+    status.textContent = source.unavailableHint;
+    return;
+  }
+
   const token = ++browse.token;
   browse.loading = true;
-  browse.loaded = true;
-  $('load-more').hidden = true;
   status.textContent = '加载中…';
   try {
-    const { items, total } = await md.searchManga({ title: browse.query, langs: currentLangs(), offset: browse.offset });
+    const settings = sourceSettings(source);
+    const { items, hasMore } = browse.query
+      ? await source.search({ query: browse.query, page: browse.page, settings })
+      : await source.latest({ page: browse.page, settings });
     if (token !== browse.token) return;
-    browse.total = total;
-    browse.offset += items.length;
+    browse.page++;
+    browse.hasMore = hasMore;
     $('browse-grid').append(...items.map(m => mangaCard({
       title: m.title,
       cover: m.cover,
-      onOpen: () => openDetail(m.id),
+      onOpen: () => openDetail(source.id, m.id),
     })));
-    status.textContent = total ? '' : '没有找到，换个关键词试试（中文名、英文名、日文罗马音都可以）';
-    $('load-more').hidden = browse.offset >= total;
+    const empty = !$('browse-grid').children.length;
+    status.textContent = empty ? '没有找到，换个关键词试试（中文名、英文名、日文罗马音都可以）' : '';
+    $('load-more').hidden = !hasMore;
   } catch (err) {
     if (token !== browse.token) return;
     status.textContent = `加载失败：${err.message}`;
@@ -304,14 +334,13 @@ async function loadBrowse(reset) {
 
 let detail = null;
 
-function onlineRecordId(mangaId) {
-  return `md:${mangaId}`;
-}
+const onlineRecordId = (sourceId, mangaId) => `${sourceId}:${mangaId}`;
 
-function newOnlineRecord(manga) {
+function newOnlineRecord(sourceId, manga) {
   return {
-    id: onlineRecordId(manga.id),
-    kind: 'mangadex',
+    id: onlineRecordId(sourceId, manga.id),
+    kind: 'online',
+    sourceId,
     mangaId: manga.id,
     title: manga.title,
     cover: null,
@@ -326,18 +355,16 @@ function newOnlineRecord(manga) {
   };
 }
 
-function cleanDescription(text) {
-  return text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Markdown 链接只保留文字
-    .replace(/(\*\*|__)/g, '')
-    .replace(/\n-{3,}[\s\S]*$/, '') // 分隔线后面通常是外部链接列表
-    .trim();
-}
-
-async function openDetail(mangaId) {
-  const langs = currentLangs();
+async function openDetail(sourceId, mangaId) {
+  const source = getSource(sourceId);
   const token = Symbol('detail');
-  detail = { token, mangaId, langs, manga: null, chapters: null, record: await db.getBook(onlineRecordId(mangaId)) };
+  detail = {
+    token,
+    source,
+    manga: null,
+    chapters: null,
+    record: await db.getBook(onlineRecordId(sourceId, mangaId)),
+  };
 
   $('detail-title').textContent = detail.record?.title || '';
   $('detail-meta').textContent = '';
@@ -346,28 +373,36 @@ async function openDetail(mangaId) {
   $('chapter-list').replaceChildren();
   $('chapter-count').textContent = '章节';
   $('detail-status').textContent = '加载中…';
-  $('detail-read').disabled = true;
+  $('detail-credit').textContent = source?.credit || '';
   $('detail').scrollTop = 0;
   renderDetailActions();
   pushOverlay($('detail'), () => { detail = null; renderLibrary(); });
 
-  if (!md.isConfigured()) {
-    $('detail-status').textContent = '还没有配置中转服务器。';
+  if (!source) {
+    $('detail-status').textContent = '这个漫画源已经不存在了。';
+    return;
+  }
+  if (!source.isAvailable()) {
+    $('detail-status').textContent = source.unavailableHint;
     return;
   }
 
   try {
-    const [manga, chapters] = await Promise.all([md.getManga(mangaId, langs), md.getChapters(mangaId, langs)]);
+    const settings = sourceSettings(source);
+    const [manga, chapters] = await Promise.all([
+      source.mangaDetails(mangaId, { settings }),
+      source.chapterList(mangaId, { settings }),
+    ]);
     if (detail?.token !== token) return;
     detail.manga = manga;
     detail.chapters = chapters;
 
     $('detail-title').textContent = manga.title;
     const statusText = { ongoing: '连载中', completed: '已完结', hiatus: '休刊', cancelled: '已腰斩' }[manga.status] || '';
-    $('detail-meta').textContent = [manga.authors.join('、'), statusText, manga.year].filter(Boolean).join(' · ');
-    $('detail-desc').textContent = cleanDescription(manga.description) || '暂无简介';
+    $('detail-meta').textContent = [manga.authors.join('、'), statusText, manga.year, source.name].filter(Boolean).join(' · ');
+    $('detail-desc').textContent = manga.description || '暂无简介';
     if (manga.cover) $('detail-cover').src = manga.cover;
-    $('detail-status').textContent = chapters.length ? '' : '这部漫画在 MangaDex 上没有可读的章节。热门作品常因版权原因被下架；也可以在「发现」页右上角切换语言试试。';
+    $('detail-status').textContent = chapters.length ? '' : source.emptyChaptersHint;
     renderDetailActions();
     renderChapterList();
   } catch (err) {
@@ -380,6 +415,7 @@ function renderDetailActions() {
   const libBtn = $('detail-library');
   libBtn.textContent = rec?.inLibrary ? '✓ 已在书架' : '＋ 加入书架';
   libBtn.classList.toggle('active', !!rec?.inLibrary);
+  libBtn.disabled = !detail.manga;
 
   const readBtn = $('detail-read');
   const chapters = detail.chapters;
@@ -389,8 +425,7 @@ function renderDetailActions() {
     return;
   }
   readBtn.disabled = false;
-  const target = continueTarget();
-  const label = md.chapterLabel(chapters[target]);
+  const label = chapters[continueTarget()].label;
   readBtn.textContent = rec?.lastReadAt ? `继续阅读 ${label}` : `开始阅读 ${label}`;
 }
 
@@ -401,7 +436,7 @@ function continueTarget() {
   const last = rec?.lastChapterId ? chapters.findIndex(c => c.id === rec.lastChapterId) : -1;
   if (last < 0) return 0;
   if (rec.readChapters.includes(rec.lastChapterId)) {
-    const next = md.findNextChapter(chapters, last);
+    const next = findNextChapter(chapters, last);
     return next >= 0 ? next : last;
   }
   return last;
@@ -409,7 +444,7 @@ function continueTarget() {
 
 function renderChapterList() {
   const { chapters, record } = detail;
-  const multiLang = new Set(chapters.map(c => c.lang)).size > 1;
+  const showTags = new Set(chapters.map(c => c.tag)).size > 1;
   $('chapter-count').textContent = `章节（${chapters.length}）`;
 
   const rows = [];
@@ -422,10 +457,10 @@ function renderChapterList() {
     if (read) btn.classList.add('read');
 
     const name = el('span', 'chapter-name');
-    if (multiLang) name.append(el('span', 'lang-tag', md.LANGUAGE_TAGS[ch.lang] || ch.lang));
-    name.append(md.chapterLabel(ch) + (ch.title && ch.chapter ? ` ${ch.title}` : ''));
+    if (showTags && ch.tag) name.append(el('span', 'lang-tag', ch.tag));
+    name.append(ch.title ? `${ch.label} ${ch.title}` : ch.label);
 
-    const sub = [ch.group, ch.publishedAt?.slice(0, 10)];
+    const sub = [ch.group, ch.date];
     if (!read && record?.lastChapterId === ch.id) sub.push(`读到第 ${record.page + 1} 页`);
     btn.append(name, el('span', 'chapter-sub', sub.filter(Boolean).join(' · ')));
     btn.addEventListener('click', () => openChapter(i));
@@ -435,44 +470,54 @@ function renderChapterList() {
   $('chapter-list').replaceChildren(...rows);
 }
 
+async function fetchCoverThumbnail(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await makeThumbnail(await res.blob());
+  } catch {
+    return null;
+  }
+}
+
 async function toggleLibrary() {
   if (!detail?.manga) return;
-  const rec = detail.record ? { ...detail.record } : newOnlineRecord(detail.manga);
-  rec.title = detail.manga.title;
+  const { source, manga } = detail;
+  const rec = detail.record ? { ...detail.record } : newOnlineRecord(source.id, manga);
+  rec.title = manga.title;
   rec.inLibrary = !rec.inLibrary;
   if (rec.inLibrary) {
     rec.addedAt = Date.now();
-    if (!rec.cover && detail.manga.cover) {
-      rec.cover = await md.fetchCoverBlob(detail.manga.cover).then(makeThumbnail).catch(() => null);
-    }
+    if (!rec.cover && manga.cover) rec.cover = await fetchCoverThumbnail(manga.cover);
   }
   await db.saveBook(rec);
-  if (detail?.manga) {
+  if (detail?.manga === manga) {
     detail.record = rec;
     renderDetailActions();
   }
   toast(rec.inLibrary ? '已加入书架' : '已从书架移除');
 }
 
-async function saveOnlineProgress(manga, chapter, { page, mode, pageCount }) {
-  const rec = (await db.getBook(onlineRecordId(manga.id))) || newOnlineRecord(manga);
+async function saveOnlineProgress(sourceId, manga, chapter, { page, mode, pageCount }) {
+  const rec = (await db.getBook(onlineRecordId(sourceId, manga.id))) || newOnlineRecord(sourceId, manga);
   rec.lastChapterId = chapter.id;
-  rec.lastChapterLabel = md.chapterLabel(chapter);
+  rec.lastChapterLabel = chapter.label;
   rec.page = page;
   rec.mode = mode;
   rec.lastReadAt = Date.now();
   if (page >= pageCount - 1 && !rec.readChapters.includes(chapter.id)) rec.readChapters.push(chapter.id);
   await db.saveBook(rec);
-  if (detail?.manga?.id === manga.id) detail.record = rec;
+  if (detail?.manga === manga) detail.record = rec;
 }
 
 async function openChapter(index, { replace = false } = {}) {
-  const { manga, chapters } = detail;
+  const { source, manga, chapters } = detail;
   const chapter = chapters[index];
-  toast(`正在打开 ${md.chapterLabel(chapter)}…`, { sticky: true });
+  toast(`正在打开 ${chapter.label}…`, { sticky: true });
   let pages;
   try {
-    pages = await md.getPageLoaders(chapter.id);
+    pages = await source.pageList(chapter.id);
+    if (!pages.length) throw new Error('这一话没有图片');
   } catch (err) {
     toast(`打不开这一话：${err.message}`);
     return;
@@ -481,16 +526,16 @@ async function openChapter(index, { replace = false } = {}) {
 
   const rec = detail.record;
   const resume = rec?.lastChapterId === chapter.id && !rec.readChapters.includes(chapter.id);
-  const next = md.findNextChapter(chapters, index);
+  const next = findNextChapter(chapters, index);
 
   openReader({
-    title: `${manga.title} · ${md.chapterLabel(chapter)}`,
+    title: `${manga.title} · ${chapter.label}`,
     pages,
     startPage: resume ? Math.min(rec.page, pages.length - 1) : 0,
     mode: rec?.mode,
     online: true,
-    save: state => saveOnlineProgress(manga, chapter, state),
-    next: next >= 0 ? { label: md.chapterLabel(chapters[next]), open: () => openChapter(next, { replace: true }) } : null,
+    save: state => saveOnlineProgress(source.id, manga, chapter, state),
+    next: next >= 0 ? { label: chapters[next].label, open: () => openChapter(next, { replace: true }) } : null,
   }, { replace });
 }
 
@@ -843,11 +888,13 @@ function bindEvents() {
   });
 
   // 发现页
-  $('lang-select').value = prefs.get('langs', 'zh');
-  $('lang-select').addEventListener('change', e => {
-    prefs.set('langs', e.target.value);
+  for (const source of sources) $('source-select').append(new Option(source.name, source.id));
+  $('source-select').hidden = sources.length < 2; // 只有一个源时不用选
+  $('source-select').addEventListener('change', e => {
+    selectSource(e.target.value);
     loadBrowse(true);
   });
+  selectSource(prefs.get('source', sources[0].id));
   $('search-form').addEventListener('submit', e => {
     e.preventDefault();
     const input = $('search-input');

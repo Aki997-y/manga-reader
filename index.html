@@ -37,20 +37,19 @@
   <section id="browse" class="tab" hidden>
     <header class="tab-header">
       <h1>发现</h1>
-      <select id="lang-select" class="select" aria-label="章节语言">
-        <option value="zh">中文</option>
-        <option value="en">English</option>
-        <option value="all">中文 + English</option>
-      </select>
+      <div class="header-controls">
+        <select id="source-select" class="select" aria-label="漫画源"></select>
+        <span id="source-settings" class="header-controls"></span>
+      </div>
     </header>
     <form id="search-form" class="search" role="search">
       <input id="search-input" type="search" placeholder="搜索漫画（中文名、英文名都行）" enterkeyhint="search" autocomplete="off">
     </form>
-    <h3 id="browse-heading" class="section-title">最近更新</h3>
+    <h3 id="browse-heading" class="section-title"></h3>
     <p id="browse-status" class="status"></p>
     <ul id="browse-grid" class="grid"></ul>
     <button id="load-more" class="btn-secondary load-more" hidden>加载更多</button>
-    <p class="credit">数据来源：MangaDex · 翻译由各汉化组提供</p>
+    <p id="browse-credit" class="credit"></p>
   </section>
 
   <nav id="tabbar" class="tabbar">
@@ -84,7 +83,7 @@
     <h3 id="chapter-count" class="section-title">章节</h3>
     <p id="detail-status" class="status"></p>
     <ul id="chapter-list" class="chapter-list"></ul>
-    <p class="credit">数据来源：MangaDex · 翻译由各汉化组提供</p>
+    <p id="detail-credit" class="credit"></p>
   </section>
 
   <!-- 浮层：阅读器 -->

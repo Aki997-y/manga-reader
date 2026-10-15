@@ -12,6 +12,7 @@
 - 点击或滑动翻页，自动保存阅读进度
 - 断网可用：本地漫画保存在本机，不会上传到任何地方
 - 在线看漫画：在「发现」页搜索 MangaDex 上的漫画，加入书架、记住读到第几话、自动进入下一话
+- 插件式漫画源：按统一接口写一个文件就能加新的来源
 
 ## 安装到 iPhone
 
@@ -30,7 +31,9 @@
 | `js/db.js` | 本地数据库（IndexedDB） |
 | `sw.js` | Service Worker，离线缓存 |
 | `manifest.webmanifest`、`icons/` | 让网页可以安装到主屏幕 |
-| `js/mangadex.js` | MangaDex 接口封装（搜索、章节、图片） |
+| `js/sources/` | 漫画源：每个文件是一个源，写法见 [`js/sources/README.md`](js/sources/README.md) |
+| `js/sources/mangadex.js` | MangaDex 源（搜索、章节、图片） |
+| `js/chapters.js` | 章节排序、找下一话 |
 | `js/config.js` | 中转服务器地址 |
 | `worker/worker.js` | 中转服务器代码，部署在 Cloudflare Workers |
 | `worker/dev.mjs` | 在本机运行中转服务器，开发测试用 |
