@@ -1,5 +1,6 @@
 import { db } from './db.js';
 import { openZip, isImageName, imageType, naturalCompare } from './zip.js';
+import * as md from './mangadex.js';
 
 const $ = id => document.getElementById(id);
 
@@ -16,6 +17,8 @@ const prefs = {
   },
 };
 
+const currentLangs = () => md.LANGUAGE_SETS[prefs.get('langs', 'zh')] || md.LANGUAGE_SETS.zh;
+
 // ---------- 小工具 ----------
 
 let toastTimer;
@@ -25,6 +28,18 @@ function toast(text, { sticky = false } = {}) {
   el.hidden = false;
   clearTimeout(toastTimer);
   if (!sticky) toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+}
+
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('toast').hidden = true;
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
 }
 
 async function makeThumbnail(blob) {
@@ -50,7 +65,48 @@ async function copyBlob(file, type) {
   return new Blob([await file.arrayBuffer()], { type: type || file.type });
 }
 
-// ---------- 导入 ----------
+// ---------- 页面切换 ----------
+// 底部两个标签页（书架、发现）是"底层"；详情页和阅读器是盖在上面的"浮层"。
+// 每打开一个浮层就往浏览器历史里加一条，这样 iPhone 上从屏幕左边缘右滑也能返回。
+
+const overlays = [];
+
+function pushOverlay(view, onClose) {
+  overlays.push({ view, onClose });
+  view.hidden = false;
+  history.pushState({ depth: overlays.length }, '');
+  document.body.classList.add('has-overlay');
+}
+
+window.addEventListener('popstate', e => {
+  const depth = e.state?.depth || 0;
+  while (overlays.length > depth) {
+    const { view, onClose } = overlays.pop();
+    view.hidden = true;
+    onClose?.();
+  }
+  document.body.classList.toggle('has-overlay', overlays.length > 0);
+});
+
+const tabScroll = {};
+function switchTab(name) {
+  const current = $('library').hidden ? 'browse' : 'library';
+  if (current === name) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  tabScroll[current] = window.scrollY;
+  $('library').hidden = name !== 'library';
+  $('browse').hidden = name !== 'browse';
+  for (const btn of document.querySelectorAll('#tabbar button')) {
+    btn.classList.toggle('active', btn.dataset.tab === name);
+  }
+  window.scrollTo(0, tabScroll[name] || 0);
+  if (name === 'browse' && !browse.loaded) loadBrowse(true);
+  if (name === 'library') renderLibrary();
+}
+
+// ---------- 导入本地漫画 ----------
 
 async function importArchive(file) {
   const blob = await copyBlob(file, 'application/zip');
@@ -124,107 +180,381 @@ async function importFiles(fileList) {
 let coverUrls = [];
 
 async function renderLibrary() {
-  const books = await db.listBooks();
+  const books = (await db.listBooks()).filter(b => b.inLibrary !== false);
   books.sort((a, b) => (b.lastReadAt - a.lastReadAt) || (b.addedAt - a.addedAt));
 
   coverUrls.forEach(URL.revokeObjectURL);
   coverUrls = [];
 
-  const grid = $('grid');
-  grid.replaceChildren(...books.map(renderCard));
+  $('grid').replaceChildren(...books.map(renderBookCard));
   $('empty').hidden = books.length > 0;
 }
 
-function renderCard(book) {
-  const li = document.createElement('li');
-  li.className = 'card';
-
-  const open = document.createElement('button');
-  open.className = 'card-open';
-  open.addEventListener('click', () => openReader(book));
-
-  const img = document.createElement('img');
-  img.className = 'cover';
-  img.alt = '';
-  if (book.cover) {
-    const url = URL.createObjectURL(book.cover);
-    coverUrls.push(url);
-    img.src = url;
+function renderBookCard(book) {
+  const online = book.kind === 'mangadex';
+  let meta;
+  if (online) {
+    meta = book.lastReadAt ? `读到 ${book.lastChapterLabel}` : '未读';
+  } else if (!book.lastReadAt) {
+    meta = `${book.pageCount} 页 · 未读`;
+  } else if (book.page >= book.pageCount - 1) {
+    meta = '已读完';
+  } else {
+    meta = `读到 ${book.page + 1} / ${book.pageCount}`;
   }
 
-  const title = document.createElement('span');
-  title.className = 'card-title';
-  title.textContent = book.title;
+  let cover = '';
+  if (book.cover) {
+    cover = URL.createObjectURL(book.cover);
+    coverUrls.push(cover);
+  }
 
-  const meta = document.createElement('span');
-  meta.className = 'card-meta';
-  const finished = book.page >= book.pageCount - 1 && book.lastReadAt > 0;
-  if (!book.lastReadAt) meta.textContent = `${book.pageCount} 页 · 未读`;
-  else if (finished) meta.textContent = '已读完';
-  else meta.textContent = `读到 ${book.page + 1} / ${book.pageCount}`;
-
-  const bar = document.createElement('span');
-  bar.className = 'progress';
-  bar.style.setProperty('--p', book.lastReadAt ? (book.page + 1) / book.pageCount : 0);
-
-  open.append(img, bar, title, meta);
-
-  const more = document.createElement('button');
-  more.className = 'card-more';
-  more.setAttribute('aria-label', `删除《${book.title}》`);
-  more.textContent = '⋯';
-  more.addEventListener('click', async () => {
-    if (!confirm(`从书架删除《${book.title}》？\n文件会从本机删除，不可恢复。`)) return;
-    await db.deleteBook(book.id);
-    await renderLibrary();
+  const li = mangaCard({
+    title: book.title,
+    cover,
+    meta,
+    badge: online ? '在线' : '',
+    progress: online || !book.lastReadAt ? null : (book.page + 1) / book.pageCount,
+    onOpen: () => (online ? openDetail(book.mangaId) : openLocalBook(book)),
   });
 
-  li.append(open, more);
+  const more = el('button', 'card-more', '⋯');
+  more.setAttribute('aria-label', `移除《${book.title}》`);
+  more.addEventListener('click', async () => {
+    if (online) {
+      if (!confirm(`从书架移除《${book.title}》？`)) return;
+      await db.saveBook({ ...book, inLibrary: false });
+    } else {
+      if (!confirm(`从书架删除《${book.title}》？\n文件会从本机删除，不可恢复。`)) return;
+      await db.deleteBook(book.id);
+    }
+    await renderLibrary();
+  });
+  li.append(more);
   return li;
 }
 
-// ---------- 阅读器 ----------
+function mangaCard({ title, cover, meta, badge, progress, onOpen }) {
+  const li = el('li', 'card');
+  const open = el('button', 'card-open');
+  open.addEventListener('click', onOpen);
 
-let reader = null;
+  const img = el('img', 'cover');
+  img.alt = '';
+  img.loading = 'lazy';
+  if (cover) img.src = cover;
+  open.append(img);
 
-async function loadPages(book) {
-  const stored = await db.getFiles(book.id);
-  if (book.kind === 'zip') {
-    const zip = await openZip(stored);
-    const entries = zip.entries.filter(e => isImageName(e.name));
-    entries.sort((a, b) => naturalCompare(a.name, b.name));
-    return entries.map(e => () => zip.read(e));
+  if (badge) open.append(el('span', 'badge', badge));
+  if (progress != null) {
+    const bar = el('span', 'progress');
+    bar.style.setProperty('--p', progress);
+    open.append(bar);
   }
-  return stored.map(blob => () => Promise.resolve(blob));
+  open.append(el('span', 'card-title', title));
+  if (meta) open.append(el('span', 'card-meta', meta));
+  li.append(open);
+  return li;
 }
 
-async function openReader(book) {
+// ---------- 发现（在线漫画） ----------
+
+const browse = { loaded: false, query: '', offset: 0, total: 0, loading: false, token: 0 };
+
+async function loadBrowse(reset) {
+  const status = $('browse-status');
+  if (!md.isConfigured()) {
+    status.textContent = '还没有配置中转服务器，暂时不能在线看漫画。配置方法见项目说明（README）。';
+    browse.loaded = true;
+    return;
+  }
+  if (reset) {
+    $('browse-heading').textContent = browse.query ? `搜索「${browse.query}」` : '最近更新';
+    browse.offset = 0;
+    browse.total = 0;
+    $('browse-grid').replaceChildren();
+  }
+  const token = ++browse.token;
+  browse.loading = true;
+  browse.loaded = true;
+  $('load-more').hidden = true;
+  status.textContent = '加载中…';
+  try {
+    const { items, total } = await md.searchManga({ title: browse.query, langs: currentLangs(), offset: browse.offset });
+    if (token !== browse.token) return;
+    browse.total = total;
+    browse.offset += items.length;
+    $('browse-grid').append(...items.map(m => mangaCard({
+      title: m.title,
+      cover: m.cover,
+      onOpen: () => openDetail(m.id),
+    })));
+    status.textContent = total ? '' : '没有找到，换个关键词试试（中文名、英文名、日文罗马音都可以）';
+    $('load-more').hidden = browse.offset >= total;
+  } catch (err) {
+    if (token !== browse.token) return;
+    status.textContent = `加载失败：${err.message}`;
+    $('load-more').hidden = false;
+  } finally {
+    if (token === browse.token) browse.loading = false;
+  }
+}
+
+// ---------- 漫画详情 ----------
+
+let detail = null;
+
+function onlineRecordId(mangaId) {
+  return `md:${mangaId}`;
+}
+
+function newOnlineRecord(manga) {
+  return {
+    id: onlineRecordId(manga.id),
+    kind: 'mangadex',
+    mangaId: manga.id,
+    title: manga.title,
+    cover: null,
+    inLibrary: false,
+    addedAt: Date.now(),
+    lastReadAt: 0,
+    lastChapterId: '',
+    lastChapterLabel: '',
+    page: 0,
+    mode: null,
+    readChapters: [],
+  };
+}
+
+function cleanDescription(text) {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Markdown 链接只保留文字
+    .replace(/(\*\*|__)/g, '')
+    .replace(/\n-{3,}[\s\S]*$/, '') // 分隔线后面通常是外部链接列表
+    .trim();
+}
+
+async function openDetail(mangaId) {
+  const langs = currentLangs();
+  const token = Symbol('detail');
+  detail = { token, mangaId, langs, manga: null, chapters: null, record: await db.getBook(onlineRecordId(mangaId)) };
+
+  $('detail-title').textContent = detail.record?.title || '';
+  $('detail-meta').textContent = '';
+  $('detail-desc').textContent = '';
+  $('detail-cover').removeAttribute('src');
+  $('chapter-list').replaceChildren();
+  $('chapter-count').textContent = '章节';
+  $('detail-status').textContent = '加载中…';
+  $('detail-read').disabled = true;
+  $('detail').scrollTop = 0;
+  renderDetailActions();
+  pushOverlay($('detail'), () => { detail = null; renderLibrary(); });
+
+  if (!md.isConfigured()) {
+    $('detail-status').textContent = '还没有配置中转服务器。';
+    return;
+  }
+
+  try {
+    const [manga, chapters] = await Promise.all([md.getManga(mangaId, langs), md.getChapters(mangaId, langs)]);
+    if (detail?.token !== token) return;
+    detail.manga = manga;
+    detail.chapters = chapters;
+
+    $('detail-title').textContent = manga.title;
+    const statusText = { ongoing: '连载中', completed: '已完结', hiatus: '休刊', cancelled: '已腰斩' }[manga.status] || '';
+    $('detail-meta').textContent = [manga.authors.join('、'), statusText, manga.year].filter(Boolean).join(' · ');
+    $('detail-desc').textContent = cleanDescription(manga.description) || '暂无简介';
+    if (manga.cover) $('detail-cover').src = manga.cover;
+    $('detail-status').textContent = chapters.length ? '' : '这部漫画在 MangaDex 上没有可读的章节。热门作品常因版权原因被下架；也可以在「发现」页右上角切换语言试试。';
+    renderDetailActions();
+    renderChapterList();
+  } catch (err) {
+    if (detail?.token === token) $('detail-status').textContent = `加载失败：${err.message}`;
+  }
+}
+
+function renderDetailActions() {
+  const rec = detail.record;
+  const libBtn = $('detail-library');
+  libBtn.textContent = rec?.inLibrary ? '✓ 已在书架' : '＋ 加入书架';
+  libBtn.classList.toggle('active', !!rec?.inLibrary);
+
+  const readBtn = $('detail-read');
+  const chapters = detail.chapters;
+  if (!chapters?.length) {
+    readBtn.textContent = '开始阅读';
+    readBtn.disabled = true;
+    return;
+  }
+  readBtn.disabled = false;
+  const target = continueTarget();
+  const label = md.chapterLabel(chapters[target]);
+  readBtn.textContent = rec?.lastReadAt ? `继续阅读 ${label}` : `开始阅读 ${label}`;
+}
+
+// "继续阅读"应该打开哪一话：上次读到的那话；读完了就是下一话
+function continueTarget() {
+  const rec = detail.record;
+  const chapters = detail.chapters;
+  const last = rec?.lastChapterId ? chapters.findIndex(c => c.id === rec.lastChapterId) : -1;
+  if (last < 0) return 0;
+  if (rec.readChapters.includes(rec.lastChapterId)) {
+    const next = md.findNextChapter(chapters, last);
+    return next >= 0 ? next : last;
+  }
+  return last;
+}
+
+function renderChapterList() {
+  const { chapters, record } = detail;
+  const multiLang = new Set(chapters.map(c => c.lang)).size > 1;
+  $('chapter-count').textContent = `章节（${chapters.length}）`;
+
+  const rows = [];
+  // 和 Mihon 一样，最新的一话排在最上面
+  for (let i = chapters.length - 1; i >= 0; i--) {
+    const ch = chapters[i];
+    const li = el('li');
+    const btn = el('button', 'chapter');
+    const read = record?.readChapters.includes(ch.id);
+    if (read) btn.classList.add('read');
+
+    const name = el('span', 'chapter-name');
+    if (multiLang) name.append(el('span', 'lang-tag', md.LANGUAGE_TAGS[ch.lang] || ch.lang));
+    name.append(md.chapterLabel(ch) + (ch.title && ch.chapter ? ` ${ch.title}` : ''));
+
+    const sub = [ch.group, ch.publishedAt?.slice(0, 10)];
+    if (!read && record?.lastChapterId === ch.id) sub.push(`读到第 ${record.page + 1} 页`);
+    btn.append(name, el('span', 'chapter-sub', sub.filter(Boolean).join(' · ')));
+    btn.addEventListener('click', () => openChapter(i));
+    li.append(btn);
+    rows.push(li);
+  }
+  $('chapter-list').replaceChildren(...rows);
+}
+
+async function toggleLibrary() {
+  if (!detail?.manga) return;
+  const rec = detail.record ? { ...detail.record } : newOnlineRecord(detail.manga);
+  rec.title = detail.manga.title;
+  rec.inLibrary = !rec.inLibrary;
+  if (rec.inLibrary) {
+    rec.addedAt = Date.now();
+    if (!rec.cover && detail.manga.cover) {
+      rec.cover = await md.fetchCoverBlob(detail.manga.cover).then(makeThumbnail).catch(() => null);
+    }
+  }
+  await db.saveBook(rec);
+  if (detail?.manga) {
+    detail.record = rec;
+    renderDetailActions();
+  }
+  toast(rec.inLibrary ? '已加入书架' : '已从书架移除');
+}
+
+async function saveOnlineProgress(manga, chapter, { page, mode, pageCount }) {
+  const rec = (await db.getBook(onlineRecordId(manga.id))) || newOnlineRecord(manga);
+  rec.lastChapterId = chapter.id;
+  rec.lastChapterLabel = md.chapterLabel(chapter);
+  rec.page = page;
+  rec.mode = mode;
+  rec.lastReadAt = Date.now();
+  if (page >= pageCount - 1 && !rec.readChapters.includes(chapter.id)) rec.readChapters.push(chapter.id);
+  await db.saveBook(rec);
+  if (detail?.manga?.id === manga.id) detail.record = rec;
+}
+
+async function openChapter(index, { replace = false } = {}) {
+  const { manga, chapters } = detail;
+  const chapter = chapters[index];
+  toast(`正在打开 ${md.chapterLabel(chapter)}…`, { sticky: true });
   let pages;
   try {
-    pages = await loadPages(book);
+    pages = await md.getPageLoaders(chapter.id);
+  } catch (err) {
+    toast(`打不开这一话：${err.message}`);
+    return;
+  }
+  hideToast();
+
+  const rec = detail.record;
+  const resume = rec?.lastChapterId === chapter.id && !rec.readChapters.includes(chapter.id);
+  const next = md.findNextChapter(chapters, index);
+
+  openReader({
+    title: `${manga.title} · ${md.chapterLabel(chapter)}`,
+    pages,
+    startPage: resume ? Math.min(rec.page, pages.length - 1) : 0,
+    mode: rec?.mode,
+    online: true,
+    save: state => saveOnlineProgress(manga, chapter, state),
+    next: next >= 0 ? { label: md.chapterLabel(chapters[next]), open: () => openChapter(next, { replace: true }) } : null,
+  }, { replace });
+}
+
+// ---------- 本地漫画 ----------
+
+async function openLocalBook(book) {
+  let pages;
+  try {
+    const stored = await db.getFiles(book.id);
+    if (book.kind === 'zip') {
+      const zip = await openZip(stored);
+      const entries = zip.entries.filter(e => isImageName(e.name));
+      entries.sort((a, b) => naturalCompare(a.name, b.name));
+      pages = entries.map(e => () => zip.read(e));
+    } else {
+      pages = stored.map(blob => () => Promise.resolve(blob));
+    }
   } catch (err) {
     toast(`打不开：${err.message}`);
     return;
   }
 
-  reader = {
-    book,
+  let current = book;
+  openReader({
+    title: book.title,
     pages,
-    index: Math.min(book.page, pages.length - 1),
-    mode: book.mode || prefs.get('defaultMode', 'rtl'),
+    startPage: Math.min(book.page, pages.length - 1),
+    mode: book.mode,
+    save: ({ page, mode }) => {
+      current = { ...current, page, mode, lastReadAt: Date.now() };
+      return db.saveBook(current);
+    },
+  });
+}
+
+// ---------- 阅读器 ----------
+// 阅读器不关心图片从哪里来：本地压缩包、图片、还是网上，
+// 只要给它一组"加载第几页"的函数就行。
+
+let reader = null;
+
+function openReader(options, { replace = false } = {}) {
+  if (replace && reader) {
+    saveProgress(true);
+    clearReaderContent();
+  }
+
+  reader = {
+    ...options,
+    index: options.startPage,
+    mode: options.mode || prefs.get('defaultMode', 'rtl'),
     urls: new Map(),   // 页码 -> Promise<图片地址>
     ratios: [],        // 页码 -> 宽高比，用于条漫模式占位
     token: 0,
     saveTimer: 0,
+    endPrompted: false,
+    stripEls: null,
   };
 
-  $('reader-title').textContent = book.title;
+  $('reader-title').textContent = options.title;
   $('mode-select').value = reader.mode;
-  $('page-slider').max = pages.length;
-  $('library').hidden = true;
-  $('reader').hidden = false;
+  $('page-slider').max = options.pages.length;
   setUiVisible(false);
-  history.pushState({ reader: book.id }, '');
+  if (!replace) pushOverlay($('reader'), closeReader);
 
   applyMode();
 
@@ -236,14 +566,24 @@ async function openReader(book) {
 
 function closeReader() {
   if (!reader) return;
-  saveProgress(true);
-  teardownScroller();
-  for (const i of reader.urls.keys()) releaseUrl(i);
-  $('page-img').removeAttribute('src');
+  const saved = saveProgress(true);
+  clearReaderContent();
   reader = null;
-  $('reader').hidden = true;
-  $('library').hidden = false;
-  renderLibrary();
+  // 进度保存完再刷新详情页，"读到第几话"才是最新的
+  saved.then(() => {
+    if (detail?.chapters) {
+      renderDetailActions();
+      renderChapterList();
+    } else if (!detail) {
+      renderLibrary();
+    }
+  });
+}
+
+function clearReaderContent() {
+  teardownScroller();
+  for (const i of [...reader.urls.keys()]) releaseUrl(i);
+  $('page-img').removeAttribute('src');
 }
 
 function getUrl(i) {
@@ -279,7 +619,10 @@ function setIndex(i) {
   const changed = reader.index !== i;
   reader.index = i;
   updateIndicator();
-  if (changed) saveProgress();
+  if (changed) {
+    reader.endPrompted = false;
+    saveProgress();
+  }
 }
 
 function updateIndicator() {
@@ -291,12 +634,12 @@ function updateIndicator() {
 function saveProgress(now = false) {
   const r = reader;
   clearTimeout(r.saveTimer);
-  const save = () => {
-    r.book = { ...r.book, page: r.index, mode: r.mode, lastReadAt: Date.now() };
-    db.saveBook(r.book).catch(err => console.error('保存进度失败', err));
-  };
-  if (now) save();
-  else r.saveTimer = setTimeout(save, 400);
+  const save = () => Promise.resolve()
+    .then(() => r.save({ page: r.index, mode: r.mode, pageCount: r.pages.length }))
+    .catch(err => console.error('保存进度失败', err));
+  if (now) return save();
+  r.saveTimer = setTimeout(save, 400);
+  return Promise.resolve();
 }
 
 function applyMode() {
@@ -334,8 +677,8 @@ async function showPage(i) {
   }
   if (r !== reader || token !== r.token) return;
 
-  // 预加载前后几页，翻页时就不用等
-  for (const j of [i + 1, i + 2, i - 1]) {
+  // 预加载后面几页，翻页时就不用等（在线看漫画时尤其重要）
+  for (const j of [i + 1, i + 2, i + 3, i - 1]) {
     if (j >= 0 && j < r.pages.length) getUrl(j).catch(() => {});
   }
   // 释放离得远的页，控制内存
@@ -346,9 +689,20 @@ async function showPage(i) {
 
 function step(delta) {
   const next = reader.index + delta;
-  if (next < 0) toast('已经是第一页');
-  else if (next >= reader.pages.length) toast('已经是最后一页');
-  else showPage(next);
+  if (next < 0) {
+    toast('已经是第一页');
+  } else if (next >= reader.pages.length) {
+    if (!reader.next) {
+      toast(reader.online ? '已经是最新的一话了' : '已经是最后一页');
+    } else if (reader.endPrompted) {
+      reader.next.open();
+    } else {
+      reader.endPrompted = true;
+      toast(`本话完。再翻一页进入${reader.next.label}`);
+    }
+  } else {
+    showPage(next);
+  }
 }
 
 // 屏幕被分成左中右三块；日漫模式下点左边是下一页
@@ -378,15 +732,24 @@ function buildScroller() {
   }, { root: scroller, rootMargin: '150% 0px' });
 
   r.stripEls = r.pages.map((_, i) => {
-    const box = document.createElement('div');
-    box.className = 'strip';
+    const box = el('div', 'strip');
     box.dataset.index = i;
     box.style.aspectRatio = r.ratios[i] || DEFAULT_RATIO;
     box.append(document.createElement('img'));
     loadObserver.observe(box);
     return box;
   });
-  scroller.replaceChildren(...r.stripEls);
+
+  const end = el('div', 'strip-end');
+  if (r.next) {
+    const btn = el('button', 'btn-primary', `下一话：${r.next.label} →`);
+    btn.addEventListener('click', e => { e.stopPropagation(); r.next.open(); });
+    end.append(btn);
+  } else {
+    end.textContent = r.online ? '已经是最新的一话了' : '全部读完了';
+  }
+
+  scroller.replaceChildren(...r.stripEls, end);
   for (const j of [...r.urls.keys()]) releaseUrl(j);
 
   r.stripEls[r.index].scrollIntoView({ block: 'start' });
@@ -404,10 +767,11 @@ async function loadStrip(i) {
   const r = reader;
   const box = r.stripEls[i];
   box.dataset.want = '1';
+  delete box.dataset.error;
   let url;
   try {
     url = await getUrl(i);
-  } catch (err) {
+  } catch {
     box.dataset.error = `第 ${i + 1} 页读取失败`;
     return;
   }
@@ -442,8 +806,8 @@ function onScroll() {
     scrollFrame = 0;
     if (!reader?.stripEls) return;
     // 屏幕正中间是哪一页，就算读到哪一页
-    const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
-    const box = el?.closest?.('.strip');
+    const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+    const box = hit?.closest?.('.strip');
     if (box) setIndex(Number(box.dataset.index));
   });
 }
@@ -461,6 +825,10 @@ function toggleUi() {
 // ---------- 事件绑定 ----------
 
 function bindEvents() {
+  for (const btn of document.querySelectorAll('#tabbar button')) {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  }
+
   $('file-input').addEventListener('change', async e => {
     const input = e.target;
     if (!input.files.length) return;
@@ -473,6 +841,34 @@ function bindEvents() {
       $('import-btn').classList.remove('busy');
     }
   });
+
+  // 发现页
+  $('lang-select').value = prefs.get('langs', 'zh');
+  $('lang-select').addEventListener('change', e => {
+    prefs.set('langs', e.target.value);
+    loadBrowse(true);
+  });
+  $('search-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const input = $('search-input');
+    input.blur(); // 收起键盘
+    browse.query = input.value.trim();
+    loadBrowse(true);
+  });
+  $('search-input').addEventListener('search', () => {
+    // 点输入框里的 × 清空时，回到热门列表
+    if (!$('search-input').value && browse.query) {
+      browse.query = '';
+      loadBrowse(true);
+    }
+  });
+  $('load-more').addEventListener('click', () => { if (!browse.loading) loadBrowse(false); });
+
+  // 详情页
+  $('detail-back').addEventListener('click', () => history.back());
+  $('detail-library').addEventListener('click', toggleLibrary);
+  $('detail-read').addEventListener('click', () => { if (detail?.chapters?.length) openChapter(continueTarget()); });
+  $('detail-desc').addEventListener('click', e => e.currentTarget.classList.toggle('expanded'));
 
   // 手指滑动翻页
   const pager = $('pager');
@@ -505,7 +901,6 @@ function bindEvents() {
   scroller.addEventListener('click', toggleUi);
 
   $('back-btn').addEventListener('click', () => history.back());
-  window.addEventListener('popstate', closeReader);
 
   $('mode-select').addEventListener('change', e => {
     reader.mode = e.target.value;
@@ -538,8 +933,8 @@ function bindEvents() {
 // ---------- 启动 ----------
 
 if (!MODES.includes(prefs.get('defaultMode', 'rtl'))) prefs.set('defaultMode', 'rtl');
-// 刷新页面后历史记录里可能残留"阅读中"的状态，清掉
-if (history.state?.reader) history.replaceState(null, '');
+// 刷新页面后历史记录里可能残留"浮层打开中"的状态，清掉
+if (history.state?.depth) history.replaceState(null, '');
 bindEvents();
 renderLibrary().catch(err => toast(`读取书架失败：${err.message}`));
 

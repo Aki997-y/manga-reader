@@ -33,6 +33,7 @@ async function run(stores, mode, fn) {
 
 export const db = {
   listBooks: () => run('books', 'readonly', tx => tx.objectStore('books').getAll()),
+  getBook: id => run('books', 'readonly', tx => tx.objectStore('books').get(id)),
   getFiles: id => run('files', 'readonly', tx => tx.objectStore('files').get(id)),
   saveBook: book => run('books', 'readwrite', tx => { tx.objectStore('books').put(book); }),
   addBook: (book, files) => run(['books', 'files'], 'readwrite', tx => {

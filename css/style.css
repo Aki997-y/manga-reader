@@ -38,12 +38,12 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 
 /* ---------- 书架 ---------- */
 
-#library {
+.tab {
   min-height: 100%;
-  padding: 0 calc(16px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  padding: 0 calc(16px + var(--safe-right)) calc(88px + var(--safe-bottom)) calc(16px + var(--safe-left));
 }
 
-.lib-header {
+.tab-header {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -54,7 +54,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   background: var(--bg);
 }
 
-.lib-header h1 { margin: 0; font-size: 28px; font-weight: 700; }
+.tab-header h1 { margin: 0; font-size: 28px; font-weight: 700; }
 
 .btn-primary {
   padding: 8px 16px;
@@ -66,6 +66,29 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   user-select: none;
 }
 .btn-primary.busy { opacity: 0.5; pointer-events: none; }
+.btn-primary:disabled { opacity: 0.5; }
+
+.btn-secondary {
+  padding: 8px 16px;
+  border: 1px solid #3a3a42;
+  border-radius: 999px;
+  background: var(--surface);
+  font-weight: 600;
+}
+.btn-secondary.active { border-color: var(--accent); color: var(--accent); }
+
+.select {
+  padding: 6px 8px;
+  border: 1px solid #3a3a42;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.muted { color: var(--muted); }
+.status { color: var(--muted); font-size: 14px; line-height: 1.6; }
+.status:empty { display: none; }
+.credit { margin: 32px 0 8px; text-align: center; font-size: 12px; color: var(--muted); }
 
 .empty { margin-top: 18vh; text-align: center; color: var(--muted); line-height: 1.7; }
 .empty-title { font-size: 20px; color: var(--text); margin-bottom: 4px; }
@@ -83,6 +106,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 .card { position: relative; min-width: 0; }
 
 .card-open {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -116,6 +140,18 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   word-break: break-all;
 }
 
+.badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1a0d08;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .card-meta { margin-top: 2px; font-size: 12px; color: var(--muted); }
 
 .card-more {
@@ -132,9 +168,131 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 
 /* ---------- 阅读器 ---------- */
 
-#reader {
+/* ---------- 发现 ---------- */
+
+.search input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #3a3a42;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px; /* 小于 16px 时 iPhone 会自动放大页面 */
+  -webkit-appearance: none;
+  appearance: none;
+}
+.load-more { display: block; margin: 24px auto 0; }
+
+/* ---------- 底部标签栏 ---------- */
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  padding: 6px var(--safe-right) calc(6px + var(--safe-bottom)) var(--safe-left);
+  background: var(--bar);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid #26262c;
+}
+.tabbar button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.tabbar svg { width: 24px; height: 24px; fill: currentColor; }
+.tabbar button.active { color: var(--accent); }
+.has-overlay .tabbar { display: none; }
+
+/* ---------- 浮层：详情页、阅读器 ---------- */
+
+.overlay {
   position: fixed;
   inset: 0;
+  z-index: 20;
+  background: var(--bg);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#detail {
+  padding: 0 calc(16px + var(--safe-right)) calc(24px + var(--safe-bottom)) calc(16px + var(--safe-left));
+}
+
+.overlay-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 -16px;
+  padding: calc(4px + var(--safe-top)) 8px 4px;
+  background: var(--bg);
+}
+
+.detail-head { display: flex; gap: 16px; align-items: flex-start; }
+.detail-cover {
+  flex: none;
+  width: 110px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.detail-info { min-width: 0; }
+.detail-info h2 { margin: 4px 0 8px; font-size: 20px; line-height: 1.35; word-break: break-word; }
+.detail-info p { margin: 0; font-size: 13px; line-height: 1.5; }
+
+.detail-actions { display: flex; gap: 10px; margin: 18px 0 4px; }
+.detail-actions .btn-primary { flex: 1; text-align: center; }
+
+.detail-desc {
+  margin: 14px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #c9c9d1;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.detail-desc.expanded { display: block; }
+
+.section-title { margin: 24px 0 8px; font-size: 16px; }
+
+.chapter-list { list-style: none; margin: 0; padding: 0; }
+.chapter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 12px 0;
+  border-bottom: 1px solid #222228;
+  text-align: left;
+}
+.chapter-name { font-size: 15px; line-height: 1.4; }
+.chapter-sub { font-size: 12px; color: var(--muted); }
+.chapter.read .chapter-name { color: var(--muted); }
+.lang-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 11px;
+  vertical-align: 1px;
+}
+
+#reader {
+  z-index: 30;
   background: #000;
   overflow: hidden;
 }
@@ -185,6 +343,12 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   height: 100%;
   -webkit-touch-callout: none;
 }
+.strip-end {
+  padding: 40px 16px calc(80px + var(--safe-bottom));
+  text-align: center;
+  color: var(--muted);
+}
+
 .strip[data-error]::after {
   content: attr(data-error);
   position: absolute;
@@ -234,14 +398,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   text-overflow: ellipsis;
 }
 
-#mode-select {
-  flex: none;
-  padding: 6px 8px;
-  border: 1px solid #3a3a42;
-  border-radius: 8px;
-  background: var(--surface);
-  font-size: 14px;
-}
+#mode-select { flex: none; }
 
 .page-label { flex: none; min-width: 64px; font-size: 14px; font-variant-numeric: tabular-nums; }
 #page-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
@@ -252,7 +409,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   position: fixed;
   left: 50%;
   bottom: calc(80px + var(--safe-bottom));
-  z-index: 10;
+  z-index: 40;
   transform: translateX(-50%);
   max-width: calc(100% - 32px);
   padding: 10px 16px;
