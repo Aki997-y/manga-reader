@@ -34,6 +34,7 @@
 | `js/config.js` | 中转服务器地址 |
 | `worker/worker.js` | 中转服务器代码，部署在 Cloudflare Workers |
 | `worker/dev.mjs` | 在本机运行中转服务器，开发测试用 |
+| `wrangler.jsonc` | 中转服务器的 Cloudflare 部署配置 |
 | `.github/workflows/pages.yml` | 推送到 main 后自动发布网站 |
 
 ## 在线漫画为什么需要中转服务器
@@ -50,12 +51,13 @@ Cloudflare Workers 免费额度是每天 10 万次请求，个人使用足够。
 
 ### 部署中转服务器
 
+Cloudflare 直接从这个 GitHub 仓库读取代码（配置在 `wrangler.jsonc`），推送到 main 后会自动更新。
+
 1. 注册 Cloudflare 免费账号：https://dash.cloudflare.com/sign-up
-2. 左侧菜单进入 **Workers 和 Pages**（新版界面里在「计算 (Workers)」下面）
-3. 点 **创建** → 选 **从 Hello World 开始** → 名称填 `manga-proxy` → **部署**
-4. 点 **编辑代码**，删掉里面所有代码，粘贴 `worker/worker.js` 的全部内容 → **部署**
-5. 复制页面上显示的网址（形如 `https://manga-proxy.xxx.workers.dev`），
-   填进 `js/config.js` 的 `PROXY_URL`
+2. 左侧菜单进入 **Workers 和 Pages** → **创建** → **导入存储库**
+3. 连接 GitHub，选择 `manga-reader` 仓库
+4. 项目名称保持 `manga-reader`（必须和 `wrangler.jsonc` 里的 `name` 一致）→ **部署**
+5. 部署后的网址（形如 `https://manga-reader.xxx.workers.dev`）填进 `js/config.js` 的 `PROXY_URL`
 
 ### 本机开发
 
