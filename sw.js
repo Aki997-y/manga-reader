@@ -2,14 +2,16 @@
 // 策略是"网络优先"：有网时总是拿最新版本，没网时用缓存。
 // 漫画文件存在 IndexedDB 里；在线漫画的图片来自中转服务器（别的域名），都不经过这里。
 
-const CACHE = 'manga-reader-v2';
+const CACHE = 'manga-reader-v3';
 const ASSETS = [
   './',
   'index.html',
   'css/style.css',
   'js/app.js',
   'js/config.js',
-  'js/mangadex.js',
+  'js/chapters.js',
+  'js/sources/index.js',
+  'js/sources/mangadex.js',
   'js/db.js',
   'js/zip.js',
   'manifest.webmanifest',

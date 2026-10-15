@@ -3,21 +3,45 @@
 // files：漫画文件本体，打开某本书时才读取。
 
 const DB_NAME = 'manga-reader';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise;
 function openDb() {
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    // 数据库升级（migration）：手机上已经存了旧格式的数据，版本号变大时在这里逐步转换
+    req.onupgradeneeded = e => {
       const db = req.result;
-      db.createObjectStore('books', { keyPath: 'id' });
-      db.createObjectStore('files');
+      if (e.oldVersion < 1) {
+        db.createObjectStore('books', { keyPath: 'id' });
+        db.createObjectStore('files');
+      }
+      if (e.oldVersion >= 1 && e.oldVersion < 2) migrateOnlineBooks(req.transaction.objectStore('books'));
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // 新版本要升级数据库时，旧页面主动让开，避免升级被卡住
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
+}
+
+// 版本 1 → 2：在线漫画从"只支持 MangaDex"改成"支持多个源"
+// 旧：{ id: 'md:<漫画ID>', kind: 'mangadex', ... }
+// 新：{ id: 'mangadex:<漫画ID>', kind: 'online', sourceId: 'mangadex', ... }
+function migrateOnlineBooks(store) {
+  store.openCursor().onsuccess = e => {
+    const cursor = e.target.result;
+    if (!cursor) return;
+    const book = cursor.value;
+    if (book.kind === 'mangadex') {
+      cursor.delete();
+      store.put({ ...book, id: `mangadex:${book.mangaId}`, kind: 'online', sourceId: 'mangadex' });
+    }
+    cursor.continue();
+  };
 }
 
 async function run(stores, mode, fn) {

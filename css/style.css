@@ -66,7 +66,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
   user-select: none;
 }
 .btn-primary.busy { opacity: 0.5; pointer-events: none; }
-.btn-primary:disabled { opacity: 0.5; }
+.btn-primary:disabled, .btn-secondary:disabled { opacity: 0.5; }
 
 .btn-secondary {
   padding: 8px 16px;
@@ -86,6 +86,7 @@ button { background: none; border: 0; padding: 0; cursor: pointer; }
 }
 
 .muted { color: var(--muted); }
+.header-controls { display: flex; gap: 8px; min-width: 0; }
 .status { color: var(--muted); font-size: 14px; line-height: 1.6; }
 .status:empty { display: none; }
 .credit { margin: 32px 0 8px; text-align: center; font-size: 12px; color: var(--muted); }
